@@ -10,8 +10,8 @@ using std::string;
 using std::auto_ptr;
 using std::map;
 
-#define MAX_AREA 0.25
-#define MAX_NODES 50000
+#define MAX_AREA 1000
+#define MAX_NODES 100000
 
 namespace api06 {
 
