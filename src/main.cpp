@@ -22,6 +22,7 @@
 #include <memory>
 #include <algorithm>
 #include <errno.h>
+#include <signal.h>
 #include <sys/wait.h>
 
 #include "bbox.hpp"
@@ -95,11 +96,13 @@ respond_error(const http::exception &e, FCGX_Request &r) {
   logger::message(format("Returning with http error %1% with reason %2%") % e.code() %e.what());
 
   const char *error_format = FCGX_GetParam("HTTP_X_ERROR_FORMAT", r.envp);
+  string cors_headers = get_cors_headers(r);
 
   ostringstream ostr;
   if (error_format && al::iequals(error_format, "xml")) {
     ostr << "Status: 200 OK\r\n"
          << "Content-Type: text/xml; charset=utf-8\r\n"
+         << cors_headers
          << "\r\n"
          << "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\r\n"
          << "<osmError>\r\n"
@@ -109,10 +112,11 @@ respond_error(const http::exception &e, FCGX_Request &r) {
   } else {
     ostr << "Status: " << e.code() << " " << e.header() << "\r\n"
          << "Content-Type: text/html\r\n"
+         << "Content-Length: 0\r\n"
          << "Error: " << e.what() << "\r\n"
-         << "\r\n"
-         << "<html><head><title>" << e.header() << "</title></head>"
-         << "<body><p>" << e.what() << "</p></body></html>\n";
+         << "Cache-Control: no-cache\r\n"
+         << cors_headers
+         << "\r\n";
   }
 
   FCGX_PutS(ostr.str().c_str(), r.out);
@@ -184,7 +188,7 @@ get_options(int argc, char **argv, po::variables_map &options) {
     ;
 
   // add the backend options to the options description
-  setup_backend_options(desc);
+  setup_backend_options(argc, argv, desc);
 
   po::store(po::parse_command_line(argc, argv, desc), options);
   po::store(po::parse_environment(desc, "CGIMAP_"), options);
@@ -192,6 +196,7 @@ get_options(int argc, char **argv, po::variables_map &options) {
 
   if (options.count("help")) {
     std::cout << desc << std::endl;
+    output_backend_options(std::cout);
     exit(1);
   }
 
@@ -201,12 +206,25 @@ get_options(int argc, char **argv, po::variables_map &options) {
 }
 
 /**
+ * Return a 405 error.
+ */
+void
+process_not_allowed(FCGX_Request &request) {
+  FCGX_FPrintF(request.out,
+               "Status: 405 Method Not Allowed\r\n"
+               "Allow: GET, HEAD, OPTIONS\r\n"
+               "Content-Type: text/html\r\n"
+               "Content-Length: 0\r\n"
+               "Cache-Control: no-cache\r\n\r\n");
+}
+
+/**
  * process a GET request.
  */
 boost::tuple<string, size_t>
 process_get_request(FCGX_Request &request, routes &route, 
                     boost::shared_ptr<data_selection::factory> factory,
-		    const string &ip) {
+		    const string &ip, const string &generator) {
   // figure how to handle the request
   handler_ptr_t handler = route(request);
   
@@ -238,16 +256,19 @@ process_get_request(FCGX_Request &request, routes &route,
   // write the response header
   FCGX_FPrintF(request.out,
 	       "Status: 200 OK\r\n"
-	       "Content-Type: text/xml; charset=utf-8\r\n"
-	       "Content-Disposition: attachment; filename=\"map.osm\"\r\n"
+	       "Content-Type: %s; charset=utf-8\r\n"
+               "%s"
 	       "Content-Encoding: %s\r\n"
-	       "Cache-Control: private, max-age=0, must-revalidate\r\n"
+	       "Cache-Control: no-cache\r\n"
 	       "%s"
-	       "\r\n", encoding->name().c_str(), cors_headers.c_str());
+	       "\r\n", 
+               mime::to_string(o_formatter->mime_type()).c_str(),
+               responder->extra_response_headers().c_str(),
+               encoding->name().c_str(), cors_headers.c_str());
   
   try {
     // call to write the response
-    responder->write(o_formatter);
+    responder->write(o_formatter, generator);
     
     // make sure all bytes have been written. note that the writer can
     // throw an exception here, leaving the xml document in a 
@@ -270,6 +291,53 @@ process_get_request(FCGX_Request &request, routes &route,
 }
 
 /**
+ * process a HEAD request.
+ */
+boost::tuple<string, size_t>
+process_head_request(FCGX_Request &request, routes &route,
+                    boost::shared_ptr<data_selection::factory> factory,
+		    const string &ip) {
+  // figure how to handle the request
+  handler_ptr_t handler = route(request);
+
+  // request start logging
+  string request_name = handler->log_name();
+  logger::message(format("Started HEAD request for %1% from %2%") % request_name % ip);
+
+  // We don't actually use the resulting data from the DB request,
+  // but it might throw an error which results in a 404 or 410 response
+
+  // The 404 and 410 responses have an empty message-body so we're safe using them unmodified
+
+  // separate transaction for the request
+  shared_ptr<data_selection> selection = factory->make_selection();
+
+  // constructor of responder handles dynamic validation (i.e: with db access).
+  responder_ptr_t responder = handler->responder(*selection);
+
+  // get encoding to use
+  shared_ptr<http::encoding> encoding = get_encoding(request);
+
+  // get any CORS headers to return
+  string cors_headers = get_cors_headers(request);
+
+  // TODO: use handler/responder to setup response headers.
+  // write the response header
+  FCGX_FPrintF(request.out,
+	       "Status: 200 OK\r\n"
+	       "Content-Type: text/xml; charset=utf-8\r\n"
+               "%s"
+	       "Content-Encoding: %s\r\n"
+	       "Cache-Control: no-cache\r\n"
+	       "%s"
+	       "\r\n", 
+               responder->extra_response_headers().c_str(),
+               encoding->name().c_str(), cors_headers.c_str());
+
+  return boost::make_tuple(request_name, 0);
+}
+
+/**
  * process an OPTIONS request.
  */
 boost::tuple<string, size_t>
@@ -278,7 +346,7 @@ process_options_request(FCGX_Request &request) {
   const char *origin = FCGX_GetParam("HTTP_ORIGIN", request.envp);
   const char *method = FCGX_GetParam("HTTP_ACCESS_CONTROL_REQUEST_METHOD", request.envp);
 
-  if (origin && strcasecmp(method, "GET") == 0) {
+  if (origin && (strcasecmp(method, "GET") == 0 || strcasecmp(method, "HEAD") == 0)) {
     // get the CORS headers to return
     string cors_headers = get_cors_headers(request);
 
@@ -289,11 +357,24 @@ process_options_request(FCGX_Request &request) {
                  "%s"
                  "\r\n\r\n", cors_headers.c_str());
   } else {
-    throw http::method_not_allowed("Only the GET method is supported for "
-                                   "map requests.");
+    process_not_allowed(request);
   }
-
   return boost::make_tuple(request_name, 0);
+}
+
+/**
+ * make a string to be used as the generator header
+ * attribute of output files. includes some instance
+ * identifying information.
+ */
+string get_generator_string() {
+  char hostname[HOST_NAME_MAX];
+  if (gethostname(hostname, sizeof hostname) != 0) {
+    throw std::runtime_error("gethostname returned error.");
+  }
+  
+  return (boost::format(PACKAGE_STRING " (%1% %2%)") 
+          % getpid() % hostname).str();
 }
 
 /**
@@ -302,6 +383,8 @@ process_options_request(FCGX_Request &request) {
  */
 static void
 process_requests(int socket, const po::variables_map &options) {
+  // generator string - identifies the cgimap instance.
+  string generator = get_generator_string();
   // open any log file
   if (options.count("logfile")) {
     logger::initialise(options["logfile"].as<string>());
@@ -365,14 +448,13 @@ process_requests(int socket, const po::variables_map &options) {
 
         // process request
         if (method == "GET") {
-	  boost::tie(request_name, bytes_written) = process_get_request(request, route, factory, ip);
-
+          boost::tie(request_name, bytes_written) = process_get_request(request, route, factory, ip, generator);
+        } else if (method == "HEAD") {
+          boost::tie(request_name, bytes_written) = process_head_request(request, route, factory, ip);
         } else if (method == "OPTIONS") {
           boost::tie(request_name, bytes_written) = process_options_request(request);
-
         } else {
-          throw http::method_not_allowed("Only the GET method is supported for "
-                                         "map requests.");
+          process_not_allowed(request);
         }
 
 	// update the rate limiter, if anything was written
@@ -509,7 +591,16 @@ main(int argc, char **argv) {
 
     // are we supposed to run as a daemon?
     if (options.count("daemon")) {
-      int instances = options["instances"].as<int>();
+      size_t instances = 0;
+      {
+        int opt_instances = options["instances"].as<int>();
+        if (opt_instances > 0) {
+           instances = opt_instances;
+        } else {
+           throw std::runtime_error("Number of instances must be strictly positive.");
+        }
+      }
+      
       bool children_terminated = false;
       std::set<pid_t> children;
 
@@ -527,7 +618,7 @@ main(int argc, char **argv) {
 	pid_t pid;
 
 	// start more children if we don't have enough
-	while (!terminate_requested && children.size() < instances) {
+	while (!terminate_requested && (children.size() < instances)) {
 	  if ((pid = fork()) < 0)
 	  {
 	    throw runtime_error("fork failed.");

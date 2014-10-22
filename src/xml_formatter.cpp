@@ -2,6 +2,7 @@
 #include "config.h"
 #include <string>
 #include <boost/shared_ptr.hpp>
+#include <stdexcept>
 
 using std::string;
 using boost::shared_ptr;
@@ -19,6 +20,9 @@ const std::string &element_type_name(element_type elt) {
       return name_way;
    case element_type_relation:
       return name_relation;
+   default:
+      // in case the switch isn't exhaustive?
+      throw std::runtime_error("Unhandled element type in element_type_name().");
    }
 }
 
@@ -31,11 +35,15 @@ xml_formatter::xml_formatter(xml_writer *w)
 xml_formatter::~xml_formatter() {
 }
 
+mime::type xml_formatter::mime_type() const {
+   return mime::text_xml;
+}
+
 void
-xml_formatter::start_document() {
+xml_formatter::start_document(const std::string &generator) {
   writer->start("osm");
   writer->attribute("version", string("0.6"));
-  writer->attribute("generator", string(PACKAGE_STRING));
+  writer->attribute("generator", generator);
 
   writer->attribute("copyright", string("OpenStreetMap and contributors"));
   writer->attribute("attribution", string("http://www.openstreetmap.org/copyright"));
@@ -60,7 +68,7 @@ xml_formatter::write_bounds(const bbox &bounds) {
 }
 
 void 
-xml_formatter::start_element_type(element_type type, size_t num_elements) {
+xml_formatter::start_element_type(element_type type) {
   // xml documents surround each element with its type, so there's no
   // need to output any information here.
 }
@@ -108,9 +116,10 @@ void
 xml_formatter::write_node(const element_info &elem, double lon, double lat, const tags_t &tags) {
   writer->start("node");
   write_common(elem);
-  writer->attribute("lat", lat);
-  writer->attribute("lon", lon);
-
+  if (elem.visible) {
+    writer->attribute("lat", lat);
+    writer->attribute("lon", lon);
+  }
   write_tags(tags);
 
   writer->end();

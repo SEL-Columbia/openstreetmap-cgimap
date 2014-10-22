@@ -35,15 +35,6 @@ public:
 
 	 /******************* information functions *******************/
 
-	 /// the number of currently selected nodes
-	 virtual int num_nodes() = 0;
-
-	 /// the number of currently selected ways
-	 virtual int num_ways() = 0;
-
-	 /// the number of currently selected relations
-	 virtual int num_relations() = 0;
-
 	 // check if the node is visible, deleted or has never existed
 	 virtual visibility_t check_node_visibility(osm_id_t id) = 0;
 
@@ -56,13 +47,13 @@ public:
 	 /******************* manipulation functions ******************/
 
 	 /// select the nodes in the list
-	 virtual void select_nodes(const std::list<osm_id_t> &) = 0;
+	 virtual int select_nodes(const std::list<osm_id_t> &) = 0;
 
 	 /// select the ways in the list
-	 virtual void select_ways(const std::list<osm_id_t> &) = 0;
+	 virtual int select_ways(const std::list<osm_id_t> &) = 0;
 
 	 /// select the relations in the list
-	 virtual void select_relations(const std::list<osm_id_t> &) = 0;
+	 virtual int select_relations(const std::list<osm_id_t> &) = 0;
 
    /// given a bounding box, select nodes within that bbox up to a limit of max_nodes
 	 virtual int select_nodes_from_bbox(const bbox &bounds, int max_nodes) = 0;

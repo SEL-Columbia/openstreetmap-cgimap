@@ -25,16 +25,13 @@ public:
 	 void write_ways(output_formatter &formatter);
 	 void write_relations(output_formatter &formatter);
 
-	 int num_nodes();
-	 int num_ways();
-	 int num_relations();
 	 visibility_t check_node_visibility(osm_id_t id);
 	 visibility_t check_way_visibility(osm_id_t id);
 	 visibility_t check_relation_visibility(osm_id_t id);
 
-	 void select_nodes(const std::list<osm_id_t> &);
-	 void select_ways(const std::list<osm_id_t> &);
-	 void select_relations(const std::list<osm_id_t> &);
+	 int select_nodes(const std::list<osm_id_t> &);
+	 int select_ways(const std::list<osm_id_t> &);
+	 int select_relations(const std::list<osm_id_t> &);
 	 int select_nodes_from_bbox(const bbox &bounds, int max_nodes);
 	 void select_nodes_from_relations();
 	 void select_ways_from_nodes();

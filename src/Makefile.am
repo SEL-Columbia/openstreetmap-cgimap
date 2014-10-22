@@ -1,4 +1,4 @@
-LDADD=@LIBPQXX_LIBS@ @FCGI_LIBS@ @YAJL_LIBS@ @LIBXML_LIBS@ @LIBMEMCACHED_LIBS@ @BOOST_REGEX_LIB@ @BOOST_PROGRAM_OPTIONS_LIB@ @BOOST_DATE_TIME_LIB@
+LDADD=@LIBPQXX_LIBS@ @FCGI_LIBS@ @YAJL_LIBS@ @LIBXML_LIBS@ @LIBMEMCACHED_LIBS@ @BOOST_REGEX_LIB@ @BOOST_PROGRAM_OPTIONS_LIB@ @BOOST_DATE_TIME_LIB@ @BOOST_SYSTEM_LIB@
 AM_LDFLAGS=@BOOST_LDFLAGS@
 AM_CPPFLAGS=-I../include @FCGI_CFLAGS@ @LIBPQXX_CFLAGS@ @LIBXML_CFLAGS@ @LIBMEMCACHED_CFLAGS@ @BOOST_CPPFLAGS@
 
@@ -34,19 +34,27 @@ ___map_SOURCES+=\
 	backend/apidb/quad_tile.cpp
 endif
 
+if ENABLE_PGSNAPSHOT
 ___map_SOURCES+=\
-	api06/map_handler.cpp
+	backend/pgsnapshot/pgsnapshot.cpp \
+	backend/pgsnapshot/snapshot_selection.cpp
+endif
+
+___map_SOURCES+=\
+	api06/handler_utils.cpp \
+	api06/map_handler.cpp \
+	api06/node_handler.cpp \
+	api06/nodes_handler.cpp \
+	api06/relation_handler.cpp \
+	api06/relations_handler.cpp \
+	api06/way_handler.cpp \
+	api06/ways_handler.cpp \
+	api06/relation_full_handler.cpp \
+	api06/way_full_handler.cpp
 
 if ENABLE_EXPERIMENTAL
 ___map_SOURCES+=\
-	api06/node_handler.cpp \
-	api06/nodes_handler.cpp \
-	api06/relation_full_handler.cpp \
-	api06/relation_handler.cpp \
-	api06/relations_handler.cpp \
-	api06/way_full_handler.cpp \
-	api06/way_handler.cpp \
-	api06/ways_handler.cpp
+	api06/node_ways_handler.cpp
 endif
 
 if ENABLE_API07
